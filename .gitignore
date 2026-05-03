@@ -1,0 +1,11 @@
+uploads/
+scraps/
+*.napkin
+*.log
+.DS_Store
+Thumbs.db
+node_modules/
+dist/
+
+# Generated snapshot kept locally; source files are the canonical version.
+Re-Link AI Mobile MVP (standalone).html

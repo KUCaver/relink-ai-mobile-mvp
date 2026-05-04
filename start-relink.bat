@@ -1,31 +1,36 @@
 @echo off
-title Re:Link AI ^— 로컬 서버 실행 중
-cd /d "C:\Users\gando\OneDrive\바탕 화면\건국대학교\건국대학교3학년 1학기\공모전\AI경진대회\프론 트이미지\App onboarding"
+title Re:Link AI - local server
+cd /d "%~dp0"
 
 echo.
-echo  [1/3] 기존 서버 정리 중...
-for /f "tokens=5" %%a in ('netstat -aon 2^>nul ^| findstr ":7654 "') do taskkill /f /pid %%a >nul 2>&1
+echo  [1/3] Stopping existing server on port 7754...
+for /f "tokens=5" %%a in ('netstat -aon 2^>nul ^| findstr ":7754 "') do taskkill /f /pid %%a >nul 2>&1
 
-echo  [2/3] 서버 시작 중 (port 7654)...
-start /min "Re:Link Server" python -m http.server 7654
+echo  [2/3] Starting local server on port 7754...
+where npm.cmd >nul 2>&1
+if errorlevel 1 (
+  start /min "Re:Link Server" powershell -NoProfile -ExecutionPolicy Bypass -Command "$env:RELINK_FRONTEND_PORT='7754'; python -m http.server 7754"
+) else (
+  start /min "Re:Link Server" npm.cmd run dev
+)
 
 timeout /t 2 /nobreak >nul
 
-echo  [3/3] 브라우저 열기...
-start "" "http://localhost:7654/Re-Link AI Mobile MVP.html"
+echo  [3/3] Opening browser...
+start "" "http://localhost:7754/Re-Link AI Mobile MVP.html"
 
 echo.
 echo =========================================
-echo   Re:Link AI MVP 가 실행됐어요!
-echo   주소: http://localhost:7654
+echo   Re:Link AI MVP is running.
+echo   URL: http://localhost:7754
 echo =========================================
 echo.
-echo   이 창을 닫으면 서버도 함께 종료됩니다.
-echo   아무 키나 누르면 종료합니다.
+echo   Keep this window open while using the app.
+echo   Press any key to stop the server.
 echo.
 pause >nul
 
 echo.
-echo  서버 종료 중...
-for /f "tokens=5" %%a in ('netstat -aon 2^>nul ^| findstr ":7654 "') do taskkill /f /pid %%a >nul 2>&1
-echo  완료.
+echo  Stopping server...
+for /f "tokens=5" %%a in ('netstat -aon 2^>nul ^| findstr ":7754 "') do taskkill /f /pid %%a >nul 2>&1
+echo  Done.

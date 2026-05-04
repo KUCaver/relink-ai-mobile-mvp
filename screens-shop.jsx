@@ -76,16 +76,16 @@ function ShopItemIcon({ kind, mode = 'night' }) {
 }
 
 function ShopScreen({ state, setState, onToast, onNavigate }) {
-  const D = state.backendData || window.RELINK_DATA;
+  const D = window.RELINK_DATA;
   const C = window.useTheme();
   const mode = C.mode;
   const isNight = mode === 'night';
   const ink = isNight ? '#1A1428' : '#3A2A1E';
 
   const owned = state.shopOwned || {};
-  const shards = state.shardsCount || D.shardsCount || ((state.savedCount || 0) + 5);
+  const shards = (state.savedCount || 0) + 5; // playful: shards on shelf
 
-  const buy = async (item) => {
+  const buy = (item) => {
     if (item.locked) {
       onToast(item.lockNote || '아직 열리지 않았어요.');
       return;
@@ -98,13 +98,8 @@ function ShopScreen({ state, setState, onToast, onNavigate }) {
       onToast(`빛 조각이 ${item.price - shards}개 더 필요해요.`);
       return;
     }
-    const result = await window.ReLinkApi.placeShopItem({ itemId: item.id });
-    setState((current) => ({
-      ...current,
-      shopOwned: { ...owned, [item.id]: true, ...(result.shopOwned || {}) },
-      backendData: result.data || current.backendData,
-    }));
-    onToast(`${item.name}을(를) 방에 두었어요. 서버 상태와 연결했어요.`);
+    setState({ ...state, shopOwned: { ...owned, [item.id]: true } });
+    onToast(`${item.name}을(를) 방에 두었어요. 위키가 좋아해요.`);
   };
 
   return (
@@ -145,7 +140,7 @@ function ShopScreen({ state, setState, onToast, onNavigate }) {
 
       {/* Item list */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        {(D.shopItems || []).map((item) => {
+        {D.shopItems.map((item) => {
           const isOwned = !!owned[item.id];
           const canAfford = shards >= item.price && !item.locked;
           return (

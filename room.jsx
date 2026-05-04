@@ -175,6 +175,7 @@ function WikiRoomScene({
         {/* moon */}
         {isNight && (
           <>
+            <circle />
             <div style={{ position: 'absolute', top: 8, left: 12, width: 14, height: 14, borderRadius: '50%', background: '#FFE6A8', opacity: 0.9, boxShadow: '0 0 12px rgba(255,230,168,0.7)' }} />
           </>
         )}

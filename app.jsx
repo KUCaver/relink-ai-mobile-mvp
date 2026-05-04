@@ -43,21 +43,14 @@ function ReLinkApp() {
     toastTimer.current = setTimeout(() => setToast((t) => ({ ...t, visible: false })), 2000);
   };
 
-  const [homeState, setHomeState] = React.useState(() => {
-    const backendData = window.ReLinkApi ? window.ReLinkApi.getInitialSnapshot() : window.RELINK_DATA;
-    const initialObserved = Object.fromEntries((backendData.observationCandidates || []).slice(0, 3).map((o) => [o.id, true]));
-    return {
-      entryText: window.RELINK_DATA.defaultEntry,
-      entrySubmitted: false,
-      observed: initialObserved,
-      expandedReasons: { [backendData.observationCandidates?.[1]?.id || 'o2']: true },
-      questDone: false,
-      savedCount: backendData.savedObservationIds?.length || 0,
-      shardsCount: backendData.shardsCount || 5,
-      apiBusy: false,
-      backendData,
-      shopOwned: { lamp: true, blanket: true },
-    };
+  const [homeState, setHomeState] = React.useState({
+    entryText: window.RELINK_DATA.defaultEntry,
+    entrySubmitted: false,
+    observed: { o1: true, o2: true, o3: true },
+    expandedReasons: { o2: true },
+    questDone: false,
+    savedCount: 0,
+    shopOwned: { lamp: true, blanket: true },
   });
 
   const tabIcons = {
@@ -101,7 +94,7 @@ function ReLinkApp() {
     switch (tab) {
       case 'home': return <HomeScreen state={homeState} setState={setHomeState} onToast={showToast} onNavigate={setTab} />;
       case 'history': return <HistoryScreen state={homeState} />;
-      case 'report': return <WeeklyReportScreen state={homeState} />;
+      case 'report': return <WeeklyReportScreen />;
       case 'wiki': return <WikiGrowthScreen state={homeState} />;
       case 'message': return <MessageScreen state={homeState} onToast={showToast} />;
       case 'shop': return <ShopScreen state={homeState} setState={setHomeState} onToast={showToast} onNavigate={setTab} />;

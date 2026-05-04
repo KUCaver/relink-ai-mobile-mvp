@@ -1,7 +1,9 @@
 // HomeScreen — vertical scroll hub for Re:Link
+// Clear hierarchy: Wiki room → today's record (primary CTA) → AI observation
+// fragments → daily quest → supporting cards (growth, report, message).
 
 function HomeScreen({ onToast, onNavigate, state, setState }) {
-  const D = state.backendData || window.RELINK_DATA;
+  const D = state.snapshot || window.RELINK_DATA;
   const C = window.useTheme();
   const I = window.ReIcon;
 
@@ -10,91 +12,72 @@ function HomeScreen({ onToast, onNavigate, state, setState }) {
   const setModeOverride = C.setMode;
 
   const {
-    entryText, entrySubmitted, observed, expandedReasons, questDone, savedCount, apiBusy,
+    entryText, entrySubmitted, observed, expandedReasons, questDone, savedCount,
   } = state;
 
-  const setEntry = (v) => setState((current) => ({ ...current, entryText: v }));
+  const applySnapshot = (snapshot, patch = {}) => {
+    if (!snapshot) return;
+    window.RELINK_DATA = { ...window.RELINK_DATA, ...snapshot };
+    setState({ ...state, snapshot: window.RELINK_DATA, ...patch });
+  };
+
+  React.useEffect(() => {
+    let mounted = true;
+    Promise.resolve(window.ReLinkApi.getInitialSnapshot()).then((result) => {
+      if (!mounted) return;
+      const snapshot = result.data || result;
+      window.RELINK_DATA = { ...window.RELINK_DATA, ...snapshot };
+      setState((prev) => ({ ...prev, snapshot: window.RELINK_DATA }));
+    });
+    return () => { mounted = false; };
+  }, []);
+
+  const setEntry = (v) => setState({ ...state, entryText: v });
   const submitEntry = async () => {
     if (!entryText.trim()) return;
-    setState((current) => ({ ...current, apiBusy: true }));
-    try {
-      const result = await window.ReLinkApi.submitEntry({ text: entryText.trim() });
-      const nextData = result.data || D;
-      const nextObserved = Object.fromEntries((nextData.observationCandidates || []).slice(0, 3).map((o) => [o.id, true]));
-      setState((current) => ({
-        ...current,
-        entrySubmitted: true,
-        observed: nextObserved,
-        expandedReasons: { [nextData.observationCandidates?.[1]?.id || 'o2']: true },
-        questDone: false,
-        savedCount: 0,
-        shardsCount: nextData.shardsCount || current.shardsCount,
-        backendData: nextData,
-        apiBusy: false,
-      }));
-      onToast('기록을 서버 흐름에 연결했어요.');
-    } catch (error) {
-      setState((current) => ({ ...current, apiBusy: false }));
-      onToast('연결 중 문제가 생겼어요. 잠시 후 다시 시도해 주세요.');
-      console.error(error);
-    }
+    const result = await window.ReLinkApi.submitEntry({ text: entryText });
+    const snapshot = result.data || result;
+    const nextObserved = Object.fromEntries((snapshot.observationCandidates || []).map((o) => [o.id, false]));
+    // unselect by default — user picks fragments themselves
+    applySnapshot(snapshot, {
+      entrySubmitted: true,
+      observed: nextObserved,
+      expandedReasons: {},
+      questDone: false,
+      savedCount: 0,
+    });
   };
   const toggleObs = (id) => {
     const next = { ...observed, [id]: !observed[id] };
-    setState((current) => ({ ...current, observed: next }));
+    setState({ ...state, observed: next });
   };
   const toggleReason = (id) => {
     const next = { ...expandedReasons, [id]: !expandedReasons[id] };
-    setState((current) => ({ ...current, expandedReasons: next }));
+    setState({ ...state, expandedReasons: next });
   };
   const saveSelected = async () => {
-    const ids = (D.observationCandidates || []).filter((o) => observed[o.id]).map((o) => o.id);
+    const ids = Object.keys(observed).filter((id) => observed[id]);
     const count = ids.length;
     if (count === 0) {
-      onToast('하나 이상 선택해 주세요.');
+      onToast('맞다고 느끼는 조각이 있다면 골라주세요.');
       return;
     }
-    setState((current) => ({ ...current, apiBusy: true }));
-    try {
-      const result = await window.ReLinkApi.saveObservations({ ids });
-      setState((current) => ({
-        ...current,
-        savedCount: count,
-        backendData: result.data || current.backendData,
-        shardsCount: result.data?.shardsCount || current.shardsCount,
-        apiBusy: false,
-      }));
-      onToast(`관찰 후보 ${count}개를 저장하고 리포트/문의문에 연결했어요.`);
-    } catch (error) {
-      setState((current) => ({ ...current, apiBusy: false }));
-      onToast('저장 연결에 실패했어요.');
-      console.error(error);
-    }
+    const result = await window.ReLinkApi.saveObservations({ ids });
+    applySnapshot(result.data || result, { savedCount: count });
+    onToast(`기억 조각 ${count}개를 정원에 심었어요.`);
   };
   const completeQuest = async () => {
-    setState((current) => ({ ...current, apiBusy: true }));
-    try {
-      const result = await window.ReLinkApi.completeQuest();
-      setState((current) => ({
-        ...current,
-        questDone: true,
-        backendData: result.data || current.backendData,
-        shardsCount: result.data?.shardsCount || current.shardsCount,
-        apiBusy: false,
-      }));
-      onToast('하루 부탁 완료가 기록/리포트에 연결됐어요.');
-    } catch (error) {
-      setState((current) => ({ ...current, apiBusy: false }));
-      onToast('하루 부탁 저장에 실패했어요.');
-      console.error(error);
-    }
+    const result = await window.ReLinkApi.completeQuest();
+    applySnapshot(result.data || result, { questDone: true });
+    onToast('빛 조각 ✨2개가 방에 더해졌어요.');
   };
 
-  const selectedCount = (D.observationCandidates || []).filter((o) => observed[o.id]).length;
+  const selectedCount = Object.values(observed).filter(Boolean).length;
+  const fragmentColors = ['#B6E0FF', '#FFE6A8', '#FFD9F0', '#C8FFD9', '#E0D9FF'];
 
   return (
     <div style={{ padding: '14px 16px 28px', display: 'flex', flexDirection: 'column', gap: 14 }}>
-      {/* Header */}
+      {/* ---------------- Header ---------------- */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '4px 2px 2px' }}>
         <div>
           <div style={{ fontSize: 19, fontWeight: 700, color: C.ink, letterSpacing: -0.3 }}>
@@ -105,8 +88,7 @@ function HomeScreen({ onToast, onNavigate, state, setState }) {
           </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          {/* day/night toggle */}
-          <div style={{ display: 'flex', background: '#fff', borderRadius: 999, padding: 3, border: '1px solid #ECEFF6' }}>
+          <div style={{ display: 'flex', background: isNight ? 'rgba(255,255,255,0.08)' : '#fff', borderRadius: 999, padding: 3, border: `1px solid ${isNight ? 'rgba(255,255,255,0.12)' : '#ECEFF6'}` }}>
             {[{ id: 'day', label: '☀️' }, { id: 'night', label: '🌙' }].map((t) => {
               const sel = mode === t.id;
               return (
@@ -123,7 +105,7 @@ function HomeScreen({ onToast, onNavigate, state, setState }) {
         </div>
       </div>
 
-      {/* Garden hero */}
+      {/* ---------------- Wiki room hero ---------------- */}
       <WikiRoomScene
         mode={mode}
         wikiMessage={questDone
@@ -133,7 +115,7 @@ function HomeScreen({ onToast, onNavigate, state, setState }) {
             : `좋은 아침! 오늘은\n"${D.dailyQuest.title}"\n어때? 완료하면 ✨2개야!`}
         recorded={entrySubmitted}
         questDone={questDone}
-        shardsCount={D.shardsCount || state.shardsCount || 5}
+        shardsCount={D.shardsCount || (5 + (savedCount || 0))}
         streakDays={D.streakDays}
         level={D.wikiLevel}
         unread={2}
@@ -142,43 +124,29 @@ function HomeScreen({ onToast, onNavigate, state, setState }) {
           const el = document.getElementById('record-card');
           if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
         }}
-        onTapShards={() => {
-          const el = document.getElementById('record-card');
-          if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-          onToast('정원의 빛 조각을 보고 있어요.');
-        }}
+        onTapShards={() => onNavigate('wiki')}
         onTapChest={() => onNavigate('message')}
         onTapPlant={() => onNavigate('wiki')}
         onTapShop={() => onNavigate('shop')}
         onToggleLamp={() => setModeOverride(isNight ? 'day' : 'night')}
       />
 
-      {/* Streak ribbon */}
-      <div style={{ display: 'flex', gap: 10, alignItems: 'center', padding: '10px 14px', borderRadius: 16, background: 'linear-gradient(90deg, #FFF6EC 0%, #FFFDF7 100%)', border: '1px solid #FBE6CB' }}>
-        <span style={{ fontSize: 18 }}>🔥</span>
-        <div style={{ flex: 1, fontSize: 13, color: '#8C5A20', fontWeight: 600, letterSpacing: -0.1 }}>
-          연속 기록 <span style={{ color: '#C77A1F', fontWeight: 800 }}>{D.streakDays}일</span>
-          <span style={{ color: '#A87A3A', fontWeight: 500 }}> · 정원에 빛 4개가 모였어요</span>
-        </div>
-        <div style={{ display: 'flex', gap: 3 }}>
-          {[1,2,3,4].map(i => (
-            <span key={i} style={{ width: 7, height: 7, borderRadius: 999, background: '#FFD27A', boxShadow: '0 0 4px rgba(255,210,122,0.7)' }} />
-          ))}
-        </div>
-      </div>
-
-      {/* Wiki greeting + record card */}
-      <ReCard padding={0} id="record-card">
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 16px 8px' }}>
-          <div style={{ fontSize: 15, fontWeight: 700, color: C.ink, display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span>{isNight ? '📔' : '✨'}</span>
-            {isNight ? '오늘을 정리하기' : '오늘을 기록하기'}
+      {/* ---------------- Step 1 — TODAY's RECORD (PRIMARY CTA) ---------------- */}
+      <ReCard padding={0} id="record-card" style={{ overflow: 'hidden' }}>
+        <div style={{ padding: '14px 16px 4px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{
+              width: 22, height: 22, borderRadius: 999, background: C.blue, color: '#fff',
+              fontSize: 11, fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}>1</span>
+            <div style={{ fontSize: 15.5, fontWeight: 800, color: C.ink, letterSpacing: -0.2 }}>
+              위키와 오늘 정리하기
+            </div>
           </div>
-          <ReChip>위키 · Lv.{D.wikiLevel}</ReChip>
+          <ReChip>약 1분</ReChip>
         </div>
 
-        <div style={{ padding: '4px 16px 8px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {/* wiki bubble */}
+        <div style={{ padding: '8px 16px 4px', display: 'flex', flexDirection: 'column', gap: 10 }}>
           <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end' }}>
             <WikiMascot size={44} />
             <ReSpeechBubble from="wiki" time={D.greetingTime}>
@@ -195,13 +163,12 @@ function HomeScreen({ onToast, onNavigate, state, setState }) {
           )}
         </div>
 
-        {/* input */}
         <div style={{ padding: '8px 12px 14px' }}>
-          <div style={{ background: '#F5F7FB', borderRadius: 16, padding: '10px 12px', border: '1px solid #ECEFF6' }}>
+          <div style={{ background: isNight ? 'rgba(255,255,255,0.06)' : '#F5F7FB', borderRadius: 16, padding: '10px 12px', border: `1px solid ${isNight ? 'rgba(255,255,255,0.08)' : '#ECEFF6'}` }}>
             <textarea
               value={entryText}
               onChange={(e) => setEntry(e.target.value)}
-              placeholder="오늘의 생각을 자유롭게 적어보세요..."
+              placeholder="위키에게 짧게 말해주세요..."
               style={{
                 width: '100%', minHeight: 60, border: 'none', background: 'transparent',
                 resize: 'none', outline: 'none', fontSize: 14, lineHeight: 1.55,
@@ -209,110 +176,151 @@ function HomeScreen({ onToast, onNavigate, state, setState }) {
               }}
             />
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 }}>
-              <button style={{ width: 32, height: 32, borderRadius: 10, background: '#fff', border: '1px solid #ECEFF6', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
+              <button title="사진 첨부" style={{ width: 32, height: 32, borderRadius: 10, background: isNight ? 'rgba(255,255,255,0.08)' : '#fff', border: `1px solid ${isNight ? 'rgba(255,255,255,0.1)' : '#ECEFF6'}`, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
                 {I.image()}
               </button>
               <RePillButton
                 onClick={submitEntry}
-                disabled={entrySubmitted || !entryText.trim() || apiBusy}
+                disabled={entrySubmitted || !entryText.trim()}
                 icon={I.send()}
+                style={{ padding: '12px 20px', fontSize: 14.5 }}
               >
-                {apiBusy ? '연결 중...' : entrySubmitted ? '기록 완료' : '기록하기'}
+                {entrySubmitted ? '기록 완료' : '기록하기'}
               </RePillButton>
             </div>
           </div>
         </div>
       </ReCard>
 
-      {/* AI observation candidates - glassmorphism gift card style */}
-      <div style={{
+      {/* ---------------- Step 2 — OBSERVATION FRAGMENTS ---------------- */}
+      <div id="frag-card" style={{
         position: 'relative',
-        opacity: entrySubmitted ? 1 : 0.6,
+        opacity: entrySubmitted ? 1 : 0.55,
         pointerEvents: entrySubmitted ? 'auto' : 'none',
         transition: 'opacity 0.3s',
       }}>
         <div style={{
-          background: isNight
-            ? 'linear-gradient(180deg, #2A3370 0%, #3B3F7A 100%)'
-            : 'linear-gradient(180deg, #DDF1F8 0%, #E8F6EC 100%)',
+          background: isNight ? '#2B2640' : '#FFFFFF',
           borderRadius: 22,
           padding: 16,
           position: 'relative',
           overflow: 'hidden',
-          border: '1px solid rgba(255,255,255,0.2)',
-          boxShadow: '0 4px 18px rgba(27,34,64,0.1)',
+          border: `1px solid ${isNight ? 'rgba(250,247,240,0.10)' : '#ECEFF6'}`,
+          boxShadow: isNight
+            ? '0 1px 2px rgba(0,0,0,0.18), 0 6px 18px rgba(0,0,0,0.22)'
+            : '0 1px 2px rgba(27,34,64,0.04), 0 6px 18px rgba(27,34,64,0.05)',
         }}>
-          {/* sparkle accents */}
-          {isNight && (
-            <>
-              <div style={{ position: 'absolute', top: 18, right: 22, width: 4, height: 4, borderRadius: 999, background: '#FFF8C8', boxShadow: '0 0 8px rgba(255,248,200,0.8)' }} />
-              <div style={{ position: 'absolute', bottom: 30, left: 30, width: 3, height: 3, borderRadius: 999, background: '#FFD9F0', boxShadow: '0 0 8px rgba(255,217,240,0.8)' }} />
-              <div style={{ position: 'absolute', top: '40%', right: 14, width: 3, height: 3, borderRadius: 999, background: '#C8E8FF', boxShadow: '0 0 8px rgba(200,232,255,0.8)' }} />
-            </>
-          )}
-
-          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 10 }}>
-            <div>
-              <div style={{ fontSize: 11, fontWeight: 700, color: isNight ? 'rgba(255,255,255,0.7)' : C.inkSoft, letterSpacing: 0.5, textTransform: 'uppercase' }}>
-                AI가 마음에서 찾은
-              </div>
-              <div style={{ fontSize: 16, fontWeight: 800, color: isNight ? '#fff' : C.ink, marginTop: 2, letterSpacing: -0.2 }}>
-                관찰 후보 조각
-              </div>
-              <div style={{ fontSize: 12, color: isNight ? 'rgba(255,255,255,0.65)' : C.inkSoft, marginTop: 4, letterSpacing: -0.1 }}>
-                {entrySubmitted ? '맞는 것만 정원에 심을 수 있어요.' : '먼저 오늘의 기록을 남겨주세요.'}
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 4 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{
+                width: 22, height: 22, borderRadius: 999, background: '#EFEAFE', color: '#7B5BD6',
+                fontSize: 11, fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>2</span>
+              <div style={{ fontSize: 15.5, fontWeight: 800, color: C.ink, letterSpacing: -0.2 }}>
+                오늘의 기억 조각 후보
               </div>
             </div>
-            <button style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '6px 10px', borderRadius: 999, background: 'rgba(255,255,255,0.18)', backdropFilter: 'blur(6px)', border: '1px solid rgba(255,255,255,0.3)', color: isNight ? '#fff' : C.inkSoft, fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>
-              {I.refresh(isNight ? '#fff' : C.inkSoft)} 다시
+            <button style={{
+              display: 'inline-flex', alignItems: 'center', gap: 4, padding: '5px 10px',
+              borderRadius: 999, background: isNight ? 'rgba(255,255,255,0.08)' : '#F8FAFD',
+              border: `1px solid ${isNight ? 'rgba(255,255,255,0.12)' : '#ECEFF6'}`,
+              color: C.inkSoft, fontSize: 11, fontWeight: 600, cursor: 'pointer',
+            }}>
+              {I.refresh(C.inkSoft)} 다시
             </button>
           </div>
+          <div style={{ fontSize: 12.5, color: C.inkSoft, marginTop: 4, marginBottom: 12, lineHeight: 1.5, letterSpacing: -0.1 }}>
+            {entrySubmitted
+              ? '위키가 오늘 기록에서 조각을 골라봤어요. 본인에게 맞는 것만 정원에 심어요.'
+              : '먼저 오늘의 기록을 남겨주세요.'}
+          </div>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {(D.observationCandidates || []).map((o) => {
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {D.observationCandidates.slice(0, 4).map((o, idx) => {
               const checked = !!observed[o.id];
               const open = !!expandedReasons[o.id];
+              const tint = fragmentColors[idx % fragmentColors.length];
               return (
-                <div key={o.id} style={{
-                  borderRadius: 14,
-                  background: checked
-                    ? (isNight ? 'rgba(120,200,138,0.25)' : '#F0F9F2')
-                    : (isNight ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.65)'),
-                  backdropFilter: 'blur(8px)',
-                  border: `1px solid ${checked
-                    ? (isNight ? 'rgba(139,217,164,0.55)' : '#CDEAD4')
-                    : 'rgba(255,255,255,0.4)'}`,
-                  padding: 10, transition: 'all 0.2s',
-                }}>
-                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-                    <button
-                      onClick={() => toggleObs(o.id)}
-                      style={{
-                        width: 22, height: 22, borderRadius: 7,
-                        background: checked ? C.green : (isNight ? 'rgba(255,255,255,0.85)' : '#fff'),
-                        border: `1.5px solid ${checked ? C.green : (isNight ? 'rgba(255,255,255,0.5)' : '#D6DBEB')}`,
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        flexShrink: 0, cursor: 'pointer', marginTop: 1,
-                      }}
-                    >
-                      {checked && I.check('#fff', 12)}
-                    </button>
-                    <div style={{ flex: 1, fontSize: 13.5, color: isNight ? '#fff' : C.ink, lineHeight: 1.5, letterSpacing: -0.1 }}>{o.text}</div>
-                    <button
-                      onClick={() => toggleReason(o.id)}
-                      style={{ display: 'inline-flex', alignItems: 'center', gap: 2, padding: '4px 8px', borderRadius: 999, background: isNight ? 'rgba(255,255,255,0.2)' : '#fff', border: `1px solid ${isNight ? 'rgba(255,255,255,0.3)' : '#ECEFF6'}`, color: isNight ? '#fff' : C.inkSoft, fontSize: 11, fontWeight: 600, cursor: 'pointer', flexShrink: 0 }}
-                    >
-                      이유 {open ? '닫기' : '보기'}
-                    </button>
-                  </div>
-                  {open && (
-                    <div style={{ marginTop: 8, marginLeft: 32, padding: 10, borderRadius: 10, background: isNight ? 'rgba(255,255,255,0.92)' : '#fff', border: '1px solid rgba(255,255,255,0.3)' }}>
-                      <div style={{ fontSize: 11, fontWeight: 700, color: C.inkMute, letterSpacing: 0.4, textTransform: 'uppercase', marginBottom: 4 }}>원문 근거</div>
-                      <div style={{ fontSize: 12.5, color: C.ink, marginBottom: 10, lineHeight: 1.5 }}>{o.source}</div>
-                      <div style={{ fontSize: 11, fontWeight: 700, color: C.inkMute, letterSpacing: 0.4, textTransform: 'uppercase', marginBottom: 4 }}>확인 질문</div>
-                      <div style={{ fontSize: 12.5, color: C.ink, lineHeight: 1.5 }}>"{o.question}"</div>
+                <div key={o.id}
+                  onClick={() => toggleObs(o.id)}
+                  style={{
+                    cursor: 'pointer',
+                    borderRadius: 16,
+                    background: checked
+                      ? (isNight ? 'rgba(127,212,155,0.16)' : '#F4FBF6')
+                      : (isNight ? 'rgba(255,255,255,0.04)' : '#FBFCFE'),
+                    border: `1.5px solid ${checked
+                      ? (isNight ? 'rgba(127,212,155,0.55)' : '#CDEAD4')
+                      : (isNight ? 'rgba(255,255,255,0.10)' : '#ECEFF6')}`,
+                    padding: 12, transition: 'all 0.2s',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+                    {/* Memory-fragment shape (not checkbox) */}
+                    <div style={{
+                      width: 36, height: 36, flexShrink: 0,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      position: 'relative',
+                    }}>
+                      <svg width="36" height="36" viewBox="0 0 36 36" style={{ position: 'absolute', inset: 0 }}>
+                        <polygon
+                          points="18,4 30,12 27,28 9,28 6,12"
+                          fill={checked ? tint : (isNight ? 'rgba(255,255,255,0.06)' : '#F5F7FB')}
+                          stroke={checked ? '#3E9B5C' : (isNight ? 'rgba(255,255,255,0.18)' : '#D6DBEB')}
+                          strokeWidth={checked ? 2 : 1.4}
+                          strokeLinejoin="round"
+                          style={{
+                            filter: checked ? `drop-shadow(0 0 6px ${tint})` : 'none',
+                            transition: 'all 0.2s',
+                          }}
+                        />
+                      </svg>
+                      {checked && (
+                        <svg width="14" height="14" viewBox="0 0 24 24" style={{ position: 'relative', zIndex: 1 }}>
+                          <polyline points="20 6 9 17 4 12" fill="none" stroke="#1F4D2E" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                      )}
                     </div>
-                  )}
+
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 11.5, fontWeight: 700, color: C.inkMute, marginBottom: 3, letterSpacing: 0.2 }}>
+                        가능성 · #{o.tag}
+                      </div>
+                      <div style={{ fontSize: 13.8, color: C.ink, lineHeight: 1.5, letterSpacing: -0.1, fontWeight: 600 }}>
+                        “{o.text}”
+                      </div>
+                      <div style={{ marginTop: 8, display: 'flex', alignItems: 'flex-start', gap: 6 }}>
+                        <span style={{ fontSize: 11, color: C.inkMute, fontWeight: 600, flexShrink: 0, marginTop: 1 }}>원문</span>
+                        <span style={{ fontSize: 12, color: C.inkSoft, lineHeight: 1.5, letterSpacing: -0.1, fontStyle: 'italic' }}>
+                          {o.source}
+                        </span>
+                      </div>
+                      {open && (
+                        <div style={{
+                          marginTop: 10, padding: '10px 12px', borderRadius: 12,
+                          background: isNight ? 'rgba(255,255,255,0.05)' : '#F8FAFD',
+                          border: `1px dashed ${isNight ? 'rgba(255,255,255,0.15)' : '#D6DBEB'}`,
+                        }}>
+                          <div style={{ fontSize: 11, fontWeight: 700, color: C.inkMute, letterSpacing: 0.3, marginBottom: 4 }}>
+                            확인 질문
+                          </div>
+                          <div style={{ fontSize: 13, color: C.ink, lineHeight: 1.55, letterSpacing: -0.1 }}>
+                            {o.question}
+                          </div>
+                        </div>
+                      )}
+                      <button
+                        onClick={(e) => { e.stopPropagation(); toggleReason(o.id); }}
+                        style={{
+                          marginTop: 8, padding: 0, background: 'transparent', border: 'none',
+                          color: C.blueDeep, fontSize: 11.5, fontWeight: 700, cursor: 'pointer',
+                          letterSpacing: -0.1,
+                        }}
+                      >
+                        {open ? '확인 질문 닫기' : '확인 질문 보기 →'}
+                      </button>
+                    </div>
+                  </div>
                 </div>
               );
             })}
@@ -320,76 +328,109 @@ function HomeScreen({ onToast, onNavigate, state, setState }) {
 
           <button
             onClick={saveSelected}
-            disabled={!entrySubmitted || apiBusy}
+            disabled={!entrySubmitted}
             style={{
-              marginTop: 12, width: '100%', padding: '13px 16px', borderRadius: 14,
-              background: 'linear-gradient(135deg, #6E80F4 0%, #5161E8 100%)',
-              color: '#fff', fontSize: 14, fontWeight: 700, letterSpacing: -0.1,
-              border: 'none', cursor: 'pointer',
-              boxShadow: '0 4px 14px rgba(81,97,232,0.4)',
+              marginTop: 14, width: '100%', padding: '13px 16px', borderRadius: 14,
+              background: selectedCount > 0
+                ? 'linear-gradient(135deg, #6E80F4 0%, #5161E8 100%)'
+                : (isNight ? 'rgba(255,255,255,0.08)' : '#F5F7FB'),
+              color: selectedCount > 0 ? '#fff' : C.inkSoft,
+              fontSize: 14, fontWeight: 800, letterSpacing: -0.1,
+              border: `1px solid ${selectedCount > 0 ? 'transparent' : (isNight ? 'rgba(255,255,255,0.1)' : '#ECEFF6')}`,
+              cursor: 'pointer',
+              boxShadow: selectedCount > 0 ? '0 4px 14px rgba(81,97,232,0.3)' : 'none',
               display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+              transition: 'all 0.2s',
             }}
           >
-            🌱 정원에 심기 ({selectedCount})
+            {selectedCount > 0
+              ? <>🌱 정원에 {selectedCount}개 심기</>
+              : '맞는 조각을 골라주세요'}
           </button>
+          <div style={{ fontSize: 10.5, color: C.inkMute, textAlign: 'center', marginTop: 8, lineHeight: 1.55 }}>
+            저장은 고른 조각만 돼요. 위키는 단정하지 않아요.
+          </div>
         </div>
       </div>
 
-      {/* Daily quest */}
+      {/* ---------------- Step 3 — DAILY QUEST ---------------- */}
       <ReCard padding={0}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 16px 8px' }}>
-          <div style={{ fontSize: 15, fontWeight: 700, color: C.ink }}>위키의 하루 부탁</div>
-          <ReChip color="#3E9B5C" bg="#E8F6EC">오늘 1개 · 보상 ✨2</ReChip>
+        <div style={{ padding: '14px 16px 6px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{
+              width: 22, height: 22, borderRadius: 999, background: '#E8F6EC', color: '#3E9B5C',
+              fontSize: 11, fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}>3</span>
+            <div style={{ fontSize: 15.5, fontWeight: 800, color: C.ink, letterSpacing: -0.2 }}>위키의 하루 부탁</div>
+          </div>
+          <ReChip color="#3E9B5C" bg="#E8F6EC">보상 · 빛 조각 ✨2</ReChip>
         </div>
-        <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', padding: '0 16px' }}>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', padding: '4px 16px 0' }}>
           <WikiMascot size={40} mood="happy" />
           <ReSpeechBubble from="wiki">
             {questDone
-              ? `잘했어! 오늘 부탁 들어줘서\n빛 조각 ✨2개 정원에 보태줄게.`
-              : `오늘은 부담 없이 하나만 해보자.\n"${D.dailyQuest.title}"\n해주면 ✨2개 챙겨줄게!`}
+              ? `잘했어! 빛 조각 ✨2개\n정원에 보태줄게.`
+              : `오늘은 이거 하나만 해보자.\n부담 없게.`}
           </ReSpeechBubble>
         </div>
         <div style={{ padding: '12px 16px 14px' }}>
-          <div style={{ background: questDone ? '#E8F6EC' : '#F0F9F2', border: `1.5px solid ${questDone ? C.green : '#CDEAD4'}`, borderRadius: 16, padding: 14 }}>
+          <div style={{
+            background: questDone
+              ? (isNight ? 'rgba(127,212,155,0.18)' : '#E8F6EC')
+              : (isNight ? 'rgba(127,212,155,0.10)' : '#F0F9F2'),
+            border: `1.5px solid ${questDone ? C.green : (isNight ? 'rgba(127,212,155,0.35)' : '#CDEAD4')}`,
+            borderRadius: 16, padding: 14,
+          }}>
             <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-              <div style={{ width: 28, height: 28, borderRadius: 8, background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, border: '1px solid #CDEAD4' }}>
-                {questDone ? I.check(C.green, 16) : <span style={{ fontSize: 16 }}>✏️</span>}
+              <div style={{
+                width: 32, height: 32, borderRadius: 10,
+                background: questDone ? C.green : (isNight ? 'rgba(255,255,255,0.95)' : '#fff'),
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                flexShrink: 0, border: `1.5px solid ${questDone ? C.green : '#CDEAD4'}`,
+              }}>
+                {questDone ? I.check('#fff', 16) : <span style={{ fontSize: 16 }}>🌿</span>}
               </div>
               <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 14.5, fontWeight: 700, color: '#1F4D2E', lineHeight: 1.45, letterSpacing: -0.1 }}>
+                <div style={{ fontSize: 14.5, fontWeight: 700, color: isNight ? '#FAF7F0' : '#1F4D2E', lineHeight: 1.45, letterSpacing: -0.1 }}>
                   {D.dailyQuest.title}
                 </div>
-                <div style={{ fontSize: 12, color: '#3E9B5C', marginTop: 6 }}>
+                <div style={{ fontSize: 11.5, color: isNight ? 'rgba(250,247,240,0.7)' : '#3E9B5C', marginTop: 6, fontWeight: 600 }}>
                   예시 · {D.dailyQuest.examples.join(' / ')}
                 </div>
-                <div style={{ fontSize: 11, color: '#7DAA8E', marginTop: 4 }}>
+                <div style={{ fontSize: 11, color: isNight ? 'rgba(250,247,240,0.55)' : '#7DAA8E', marginTop: 4, lineHeight: 1.5 }}>
                   💡 {D.dailyQuest.why}
-                </div>
-                <div style={{ fontSize: 11.5, color: '#8C5A20', marginTop: 6, fontWeight: 700 }}>
-                  🎁 보상 · 빛 조각 ✨2개 + 위키 호감도 +5
                 </div>
               </div>
             </div>
             <button
               onClick={completeQuest}
-              disabled={questDone || apiBusy}
+              disabled={questDone}
               style={{
-                marginTop: 12, width: '100%', padding: '11px 12px', borderRadius: 12,
-                background: questDone ? '#fff' : C.green, color: questDone ? C.green : '#fff',
+                marginTop: 12, width: '100%', padding: '12px 12px', borderRadius: 12,
+                background: questDone
+                  ? (isNight ? 'rgba(255,255,255,0.06)' : '#fff')
+                  : C.green,
+                color: questDone ? C.green : '#fff',
                 border: questDone ? `1.5px solid ${C.green}` : 'none',
-                fontSize: 13.5, fontWeight: 700, cursor: questDone ? 'default' : 'pointer',
+                fontSize: 14, fontWeight: 800, cursor: questDone ? 'default' : 'pointer',
                 display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                letterSpacing: -0.1,
               }}
             >
-              {questDone ? <>{I.check(C.green, 14)} 오늘의 부탁을 완료했어요</> : '완료했어요'}
+              {questDone
+                ? <>{I.check(C.green, 14)} 오늘의 부탁을 완료했어요</>
+                : '완료했어요'}
             </button>
           </div>
         </div>
       </ReCard>
 
-      {/* Two-column mini cards row */}
+      {/* ---------------- Bottom row: secondary cards ---------------- */}
+      <div style={{ fontSize: 11.5, fontWeight: 700, color: C.inkMute, padding: '4px 4px 0', letterSpacing: 0.4, textTransform: 'uppercase' }}>
+        쌓인 기록 · 천천히 보기
+      </div>
+
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-        {/* Wiki growth mini */}
         <ReCard padding={14} style={{ cursor: 'pointer' }} onClick={() => onNavigate('wiki')}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <div style={{ fontSize: 13.5, fontWeight: 700, color: C.ink }}>위키 성장</div>
@@ -411,51 +452,45 @@ function HomeScreen({ onToast, onNavigate, state, setState }) {
           </div>
         </ReCard>
 
-        {/* Weekly report mini */}
         <ReCard padding={14} style={{ cursor: 'pointer' }} onClick={() => onNavigate('report')}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <div style={{ fontSize: 13.5, fontWeight: 700, color: C.ink }}>주간 리포트</div>
+            <div style={{ fontSize: 13.5, fontWeight: 700, color: C.ink }}>생활 흐름</div>
             {I.chevRight(C.inkMute, 12)}
           </div>
-          <div style={{ fontSize: 10.5, color: C.inkSoft, marginTop: 4 }}>4.21 (월) - 4.27 (일)</div>
+          <div style={{ fontSize: 10.5, color: C.inkSoft, marginTop: 4 }}>최근 7일</div>
           <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 5 }}>
             {D.weeklyKeywords.map((k) => (
               <div key={k.word} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{ fontSize: 12, fontWeight: 700, color: k.color, width: 32 }}>{k.word}</span>
-                <div style={{ flex: 1, height: 6, borderRadius: 999, background: '#F5F7FB', overflow: 'hidden' }}>
+                <span style={{ fontSize: 12, fontWeight: 700, color: k.color, width: 32 }}>#{k.word}</span>
+                <div style={{ flex: 1, height: 6, borderRadius: 999, background: isNight ? 'rgba(255,255,255,0.08)' : '#F5F7FB', overflow: 'hidden' }}>
                   <div style={{ width: `${(k.count / 6) * 100}%`, height: '100%', background: k.color, opacity: 0.9 }} />
                 </div>
-                <span style={{ fontSize: 10.5, color: C.inkSoft, width: 22, textAlign: 'right' }}>{k.count}회</span>
+                <span style={{ fontSize: 10.5, color: C.inkSoft, width: 22, textAlign: 'right' }}>{k.count}</span>
               </div>
             ))}
           </div>
         </ReCard>
       </div>
 
-      {/* Pre-counsel message preview */}
+      {/* ---------------- Pre-counsel exit ---------------- */}
       <ReCard padding={16} style={{ cursor: 'pointer' }} onClick={() => onNavigate('message')}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-          <div style={{ fontSize: 15, fontWeight: 700, color: C.ink }}>상담 전 문의문</div>
-          <ReChip color="#5A6585" bg="#F5F7FB" style={{ fontWeight: 600 }}>
+          <div style={{ fontSize: 14.5, fontWeight: 800, color: C.ink, letterSpacing: -0.2 }}>상담·지원 문의 준비</div>
+          <ReChip color={C.inkSoft} bg={isNight ? 'rgba(255,255,255,0.08)' : '#F5F7FB'} style={{ fontWeight: 600 }}>
             {I.lock(C.inkMute, 11)}<span style={{ marginLeft: 3 }}>자동 전송 안 함</span>
           </ReChip>
         </div>
-        <div style={{ fontSize: 12, color: C.inkSoft, marginBottom: 10, lineHeight: 1.5 }}>
-          필요할 때만 만들고, 직접 수정해서 사용할 수 있어요.
+        <div style={{ fontSize: 12.5, color: C.inkSoft, marginBottom: 10, lineHeight: 1.55, letterSpacing: -0.1 }}>
+          쌓인 기록을 바탕으로 문의문 초안을 만들어요. 직접 수정해서 사용해요.
         </div>
-        <div style={{ background: '#F8FAFD', borderRadius: 14, padding: 12, border: '1px solid #ECEFF6' }}>
-          <div style={{ fontSize: 13, color: C.ink, lineHeight: 1.6, letterSpacing: -0.1 }}>
-            “안녕하세요. 최근 비교와 불안감이 자주 올라와 힘들어요. 스스로를 믿고 싶은데 잘 안 돼서 도움을 받고 싶습니다…”
-          </div>
-        </div>
-        <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-          <RePillButton variant="soft" style={{ flex: 1, padding: '10px 12px' }}>문의문 보기</RePillButton>
-          <RePillButton variant="ghost" style={{ flex: 1, padding: '10px 12px' }} icon={I.copy()} onClick={(e) => { e.stopPropagation(); onToast('미리보기를 복사했어요.'); }}>복사하기</RePillButton>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <RePillButton variant="soft" style={{ flex: 1, padding: '10px 12px' }}>문의문 준비</RePillButton>
+          <RePillButton variant="ghost" style={{ flex: 1, padding: '10px 12px' }}>지원 후보 보기</RePillButton>
         </div>
       </ReCard>
 
-      <div style={{ textAlign: 'center', fontSize: 11, color: C.inkMute, padding: '8px 8px 0' }}>
-        Re:Link는 진단을 대신하지 않아요. 사용자가 저장한 기록만 모아둡니다.
+      <div style={{ textAlign: 'center', fontSize: 11, color: C.inkMute, padding: '6px 8px 0', lineHeight: 1.55 }}>
+        Re:Link는 진단 앱이 아니에요. {D.userName}님이 확인한 기록만 모아둡니다.
       </div>
     </div>
   );

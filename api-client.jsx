@@ -1,5 +1,5 @@
 // Re:Link API adapter.
-// Set window.RELINK_API_BASE_URL = 'http://127.0.0.1:8000' before this file
+// Set window.RELINK_API_BASE_URL = 'http://127.0.0.1:8787' before this file
 // to use a real backend. Without it, the same contract runs against local mock data.
 
 (function initReLinkApi() {
@@ -168,7 +168,7 @@
         count: Math.max(2, 6 - index * 2),
         color: ['#5B6FEF', '#F5A86B', '#5BB97A'][index] || '#5B6FEF',
       })),
-      repeatedPhrases: saved.length ? Array.from(new Set(saved.map((o) => o.source.replace(/[“”"]/g, ''))).slice(0, 3)) : window.RELINK_DATA.repeatedPhrases,
+      repeatedPhrases: saved.length ? Array.from(new Set(saved.map((o) => o.source.replace(/[“”"]/g, '')))).slice(0, 3) : window.RELINK_DATA.repeatedPhrases,
       pausedActions: saved.length ? Array.from(new Set(saved.map((o) => o.tag))).slice(0, 3) : window.RELINK_DATA.pausedActions,
       possibleActions: [store.dailyQuest.title, '기록 남기기', '문의문 초안 확인'],
       emotionFlow: window.RELINK_DATA.emotionFlow,
@@ -212,15 +212,19 @@
     };
   };
 
-  const request = async (path, body, fallback) => {
+  const request = async (path, body, fallback, options = {}) => {
     const baseUrl = window.RELINK_API_BASE_URL;
+    const method = options.method || 'POST';
     if (baseUrl) {
       try {
-        const res = await fetch(`${baseUrl}${path}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body || {}),
-        });
+        const init = method === 'GET'
+          ? { method }
+          : {
+              method,
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(body || {}),
+            };
+        const res = await fetch(`${baseUrl}${path}`, init);
         if (!res.ok) throw new Error(`API ${res.status}`);
         return await res.json();
       } catch (error) {
@@ -232,7 +236,7 @@
 
   window.ReLinkApi = {
     getInitialSnapshot() {
-      return snapshot();
+      return request('/api/snapshot', null, () => ({ data: snapshot() }), { method: 'GET' });
     },
 
     async submitEntry({ text }) {
